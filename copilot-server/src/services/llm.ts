@@ -48,7 +48,7 @@ Provide concise, accurate coding assistance based on the available context.`;
 
     // Call Claude API
     const response = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-haiku-20240307',
       max_tokens: 1024,
       system: systemPrompt,
       messages: [
@@ -68,7 +68,16 @@ Provide concise, accurate coding assistance based on the available context.`;
     return aiResponse;
     
   } catch (error) {
+    // Enhanced error logging for debugging
     console.error('Error getting Claude response:', error);
+    
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+    }
     
     // Return helpful error message
     if (error instanceof Error && error.message.includes('API key')) {

@@ -1,16 +1,167 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useMicrophone } from '@/hooks/useMicrophone';
 
 export default function SidecarView() {
+  console.log('SidecarView re-rendered');
+  
+  // State
   const [transcript, setTranscript] = useState<string>('');
   const [aiResponse, setAiResponse] = useState<string>('');
   const [isConnected, setIsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  
+  // Refs
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioQueueRef = useRef<AudioBuffer[]>([]);
+  const isPlayingRef = useRef(false);
+  const nextPlayTimeRef = useRef(0);
 
+  /**
+   * Initialize Web Audio API context
+   * Must be called after user interaction
+   */
+  const initAudioContext = useCallback(() => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      console.log('Audio context initialized');
+    }
+  }, []);
+
+  /**
+   * Play next audio buffer in queue
+   */
+  const playNextInQueue = useCallback(() => {
+    if (!audioContextRef.current || audioQueueRef.current.length === 0) {
+      isPlayingRef.current = false;
+      return;
+    }
+
+    isPlayingRef.current = true;
+    const audioBuffer = audioQueueRef.current.shift()!;
+
+    // Create buffer source
+    const source = audioContextRef.current.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContextRef.current.destination);
+
+    // Calculate when to start playing
+    const currentTime = audioContextRef.current.currentTime;
+    const startTime = Math.max(currentTime, nextPlayTimeRef.current);
+    
+    // Schedule playback
+    source.start(startTime);
+    
+    // Update next play time
+    nextPlayTimeRef.current = startTime + audioBuffer.duration;
+
+    // When this buffer ends, play next
+    source.onended = () => {
+      playNextInQueue();
+    };
+  }, []); // No dependencies - uses only refs and recursion
+
+  /**
+   * Queue an audio chunk for playback
+   */
+  const queueAudioChunk = useCallback(async (base64Audio: string, format: string) => {
+    try {
+      if (!audioContextRef.current) {
+        initAudioContext();
+      }
+
+      // Decode base64 to ArrayBuffer
+      const binaryString = atob(base64Audio);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const arrayBuffer = bytes.buffer;
+
+      // Decode audio data
+      const audioBuffer = await audioContextRef.current!.decodeAudioData(arrayBuffer);
+      
+      // Add to queue
+      audioQueueRef.current.push(audioBuffer);
+
+      // Start playing if not already playing
+      if (!isPlayingRef.current) {
+        playNextInQueue();
+      }
+
+    } catch (error) {
+      console.error('Error queuing audio chunk:', error);
+    }
+  }, [initAudioContext, playNextInQueue]);
+
+  /**
+   * Handle incoming WebSocket messages
+   */
+  const handleWebSocketMessage = useCallback((data: any) => {
+    try {
+      const message = typeof data === 'string' ? JSON.parse(data) : data;
+
+      switch (message.type) {
+        case 'ready':
+          console.log('WebSocket ready:', message.message);
+          break;
+
+        case 'transcript':
+          if (message.isFinal) {
+            setTranscript(message.data);
+          } else {
+            // Show interim results in a lighter color or different style
+            setTranscript(message.data + '...');
+          }
+          break;
+
+        case 'ai_response':
+          setAiResponse(message.data);
+          break;
+
+        case 'audio':
+          // Queue and play audio chunk
+          queueAudioChunk(message.data, message.format || 'mp3');
+          break;
+
+        case 'audio_end':
+          console.log('Audio stream ended, total chunks:', message.totalChunks);
+          break;
+
+        case 'recording_started':
+          console.log('Recording started on server');
+          break;
+
+        case 'recording_stopped':
+          console.log('Recording stopped, full transcript:', message.fullTranscript);
+          break;
+
+        case 'error':
+          console.error('Server error:', message.message);
+          alert('Error: ' + message.message);
+          break;
+
+        default:
+          console.log('Unknown message type:', message.type);
+      }
+    } catch (error) {
+      console.error('Error handling WebSocket message:', error);
+    }
+  }, [queueAudioChunk, setTranscript, setAiResponse]); // All state setters are stable
+
+  /**
+   * Clear audio queue (e.g., when stopping)
+   */
+  const clearAudioQueue = useCallback(() => {
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
+    nextPlayTimeRef.current = 0;
+  }, []);
+
+  // Hooks must be called after all callback definitions
   // WebSocket connection
   const { sendMessage, lastMessage, connectionStatus } = useWebSocket({
     onMessage: handleWebSocketMessage,
@@ -26,83 +177,61 @@ export default function SidecarView() {
     },
   });
 
+  // Update connection status
   useEffect(() => {
     setIsConnected(connectionStatus === 'connected');
   }, [connectionStatus]);
 
-  function handleWebSocketMessage(data: any) {
-    try {
-      const message = typeof data === 'string' ? JSON.parse(data) : data;
+  const handleMuteToggle = useCallback(() => {
+    setIsMuted(prev => {
+      const newMuted = !prev;
+      sendMessage(JSON.stringify({
+        type: 'control',
+        action: newMuted ? 'mute' : 'unmute'
+      }));
+      return newMuted;
+    });
+  }, [sendMessage]);
 
-      switch (message.type) {
-        case 'ready':
-          console.log('WebSocket ready:', message.message);
-          break;
-
-        case 'transcript':
-          setTranscript(message.data);
-          break;
-
-        case 'ai_response':
-          setAiResponse(message.data);
-          break;
-
-        case 'audio':
-          // Play audio chunk
-          playAudioChunk(message.data);
-          break;
-
-        case 'audio_end':
-          console.log('Audio stream ended');
-          break;
-
-        case 'error':
-          console.error('Server error:', message.message);
-          break;
-
-        default:
-          console.log('Unknown message type:', message.type);
-      }
-    } catch (error) {
-      console.error('Error handling WebSocket message:', error);
-    }
-  }
-
-  function playAudioChunk(base64Audio: string) {
-    // TODO: Implement proper audio streaming playback
-    // For now, this is a placeholder
-    // You'll need to:
-    // 1. Decode base64 audio
-    // 2. Create audio context
-    // 3. Queue and play audio chunks smoothly
-    console.log('Playing audio chunk...');
-  }
-
-  function handleMuteToggle() {
-    setIsMuted(!isMuted);
-    
-    sendMessage(JSON.stringify({
-      type: 'control',
-      action: isMuted ? 'unmute' : 'mute'
-    }));
-  }
-
-  function handleEndSession() {
+  const handleEndSession = useCallback(() => {
     stopRecording();
+    clearAudioQueue();
     
     sendMessage(JSON.stringify({
       type: 'control',
       action: 'end_session'
     }));
-  }
+    
+    // Reset state
+    setTranscript('');
+    setAiResponse('');
+  }, [stopRecording, clearAudioQueue, sendMessage]);
 
-  function handleStartStop() {
+  const handleStartStop = useCallback(() => {
     if (isRecording) {
       stopRecording();
+      
+      // Notify server to stop transcription
+      sendMessage(JSON.stringify({
+        type: 'stop_recording'
+      }));
+      
     } else {
-      startRecording();
+      // Initialize audio context on user interaction (browser requirement)
+      initAudioContext();
+      
+      // IMPORTANT: Send start_recording message BEFORE starting microphone
+      // This ensures Deepgram is ready to receive audio chunks
+      sendMessage(JSON.stringify({
+        type: 'start_recording'
+      }));
+      
+      // Small delay to let server initialize transcriber
+      setTimeout(() => {
+        startRecording();
+      }, 100);
     }
-  }
+  }, [isRecording, stopRecording, sendMessage, initAudioContext, startRecording]);
 
   return (
     <div className="flex items-center justify-center min-h-screen p-4">
