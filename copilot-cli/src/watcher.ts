@@ -77,10 +77,24 @@ export async function startWatcher(directoryPath: string, serverUrl: string): Pr
     },
   });
 
-  // Handle 'add' event
+  // Handle 'add' event for new files
   watcher.on('add', async (filePath: string) => {
-    console.log(`File added: ${filePath}`);
-    await sendFileUpdate(filePath, serverUrl);
+    console.log(`➕ File added: ${filePath}`);
+    // Send the content of newly added files too
+    try {
+      // Wait a brief moment in case the file is still being written
+      await new Promise(resolve => setTimeout(resolve, 150)); // Small delay
+
+      await sendFileUpdate(filePath, serverUrl);
+    } catch (error) {
+      // Handle errors reading the new file (e.g., might be a temp file quickly deleted)
+      if (error instanceof Error && (error as any).code === 'ENOENT') {
+        // Ignore if file not found (deleted quickly)
+        // Silently skip
+      } else {
+        console.error(`❌ Error processing newly added file ${filePath}:`, error instanceof Error ? error.message : error);
+      }
+    }
   });
 
   // Handle 'change' event

@@ -133,22 +133,40 @@ export async function handleWebSocketConnection(ws: WebSocket, req: IncomingMess
                 const userText = parsed.message.trim();
                 console.log(`🚀 [TEXT_INPUT] Starting LLM and TTS pipeline for: "${userText}"`);
                 
-                // Get file context from cache
-                const keywords = userText.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-                const fileContext = fileCache.getRelevantContext(keywords);
-                
-                console.log('📁 Retrieved file context for text input');
-                
-                // Build system prompt with file context
-                const systemPrompt = `You are a helpful coding assistant. You have access to the user's codebase through file monitoring.
+                // --- Smart Context Selection ---
+                console.log('🧠 Selecting relevant file context...');
+                const userQueryText = userText.toLowerCase(); // Use lowercase for matching
+                let relevantFileContext = '';
+                let filesIncluded: string[] = [];
 
-Current codebase context:
-${fileContext}
+                // Simple keyword matching for filenames mentioned in the query
+                for (const [filePath, cachedFile] of fileCache.entries()) {
+                    // Extract filename from path for matching
+                    const fileName = filePath.split(/[\\/]/).pop()?.toLowerCase(); 
+                    if (fileName && userQueryText.includes(fileName)) {
+                        console.log(`   ✅ Including context for mentioned file: ${filePath}`);
+                        // Format context clearly for the LLM
+                        relevantFileContext += `\n\n--- START FILE: ${filePath} ---\n${cachedFile.content}\n--- END FILE: ${filePath} ---\n`;
+                        filesIncluded.push(filePath);
+                    }
+                }
 
-Provide concise, accurate coding assistance based on the available context.`;
+                // Fallback: If no specific files mentioned, maybe include the *last* updated file?
+                if (!relevantFileContext && fileCache.size > 0) {
+                    console.log('   ⚠️ No specific files mentioned. Including last updated file as context.');
+                    // This assumes fileCache iteration order might reflect insertion order (Map behavior)
+                    const [lastFilePath, lastCachedFile] = Array.from(fileCache.entries()).pop()!; 
+                    relevantFileContext = `\n\n--- START FILE: ${lastFilePath} ---\n${lastCachedFile.content}\n--- END FILE: ${lastFilePath} ---\n`;
+                    filesIncluded.push(lastFilePath);
+                } else if (!relevantFileContext) {
+                    console.log('   ⚠️ No files mentioned and cache is empty. Proceeding without file context.');
+                    relevantFileContext = '\n\n--- No file context available ---'; // Explicitly tell LLM
+                }
+                console.log(`   Context selection complete. Included ${filesIncluded.length} file(s).`);
+                // --- End Smart Context Selection ---
                 
-                // Get LLM response
-                const llmResponse = await getClaudeResponse(userText);
+                // Get LLM response with selected context
+                const llmResponse = await getClaudeResponse(userText, relevantFileContext);
                 console.log('✨ LLM response generated for text input');
                 
                 // Send text response to client

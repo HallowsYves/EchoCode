@@ -26,35 +26,33 @@ function getAnthropicClient(): Anthropic {
 /**
  * Get AI response from Claude with relevant file context
  * @param userMessage User's question or request
+ * @param fileContext Optional file context to provide to Claude
  * @returns AI-generated response
  */
-export async function getClaudeResponse(userMessage: string): Promise<string> {
+export async function getClaudeResponse(userMessage: string, fileContext?: string): Promise<string> {
   try {
     const client = getAnthropicClient();
 
-    // Extract potential keywords for context retrieval
-    const keywords = extractKeywords(userMessage);
-    
-    // Get relevant file context from cache
-    const fileContext = fileCache.getRelevantContext(keywords);
+    // If fileContext not provided, get it from cache
+    let contextToUse = fileContext;
+    if (!contextToUse) {
+      const keywords = extractKeywords(userMessage);
+      contextToUse = fileCache.getRelevantContext(keywords);
+    }
 
-    // Build system prompt with file context
-    const systemPrompt = `You are a helpful coding assistant. You have access to the user's codebase through file monitoring.
-
-Current codebase context:
-${fileContext}
-
-Provide concise, accurate coding assistance based on the available context.`;
+    // Build conversational system prompt
+    const systemPrompt = `You are an AI code co-pilot providing quick, conversational updates. When asked about code changes or file contents based on the provided context, respond like you're briefing a colleague. Be concise (1-3 sentences if possible), focus on the main point, and use natural language. Avoid lists or overly formal explanations unless specifically asked. If no file context is provided or relevant, state that clearly but politely.`;
 
     // Call Claude API
     const response = await client.messages.create({
       model: 'claude-3-haiku-20240307',
-      max_tokens: 1024,
+      max_tokens: 300,
       system: systemPrompt,
       messages: [
         {
           role: 'user',
-          content: userMessage,
+          // Prepend context clearly for the model
+          content: `Context provided:\n${contextToUse}\n\nUser query: ${userMessage}`,
         },
       ],
     });
