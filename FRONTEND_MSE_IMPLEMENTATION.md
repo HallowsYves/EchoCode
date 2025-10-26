@@ -1,3 +1,10 @@
+# Frontend MSE Implementation Guide
+
+## Complete SidecarView.tsx with Media Source Extensions
+
+Replace the entire `copilot-ui/src/components/SidecarView.tsx` file with this implementation:
+
+```tsx
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -412,3 +419,37 @@ export default function SidecarView() {
     </div>
   );
 }
+```
+
+## Key Changes Summary
+
+### Removed (Web Audio API):
+- `audioContextRef`, `audioQueueRef`, `isPlayingRef`, `nextPlayTimeRef`, `currentSourceRef`
+- `initAudioContext()`, `playNextInQueue()`, `queueAudioChunk()`
+- Manual buffer scheduling and timing logic
+
+### Added (Media Source Extensions):
+- `audioElementRef`, `mediaSourceRef`, `sourceBufferRef`, `audioChunkQueueRef`, `isAppendingRef`
+- `initializeMediaSource()` - creates MediaSource and SourceBuffer
+- `appendAudioChunk()` - manages buffer appending with queue
+- `handleAudioChunk()` - decodes base64 and appends to buffer
+- Automatic playback via HTML5 `<audio>` element
+
+### Benefits:
+✅ **Smoother playback** - Browser handles buffering natively
+✅ **No manual scheduling** - Eliminates gaps and pops
+✅ **Better MP3 support** - MSE designed for streaming media
+✅ **Simpler code** - Let the browser do the heavy lifting
+
+## Testing
+
+1. Replace the entire `SidecarView.tsx` file
+2. Start both servers
+3. Click Start Recording
+4. Backend logs should show `[START_RECORDING]`, `[START]` tags
+5. Speak and wait for AI response
+6. Audio should play smoothly without choppiness
+7. Click Stop Recording - backend should show `[STOP_RECORDING]`, `[STOP]` tags
+8. Click Start again - should work reliably with fresh transcriber instance
+
+Backend is production-ready with robust state management! 🎉

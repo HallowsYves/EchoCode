@@ -47,27 +47,57 @@ function getDeepgramClient() {
 export class DeepgramTranscriber extends EventEmitter {
   private connection: LiveClient | null = null;
   private isConnected: boolean = false;
+  private isStarting: boolean = false;
+  private isStopping: boolean = false;
   private connectionOpenPromise: Promise<void> | null = null;
 
   constructor() {
     super();
+    console.log('🎤 DeepgramTranscriber instance created');
   }
 
   /**
-   * Start a live transcription session
+   * Start a live transcription session (IDEMPOTENT)
+   * Safe to call multiple times - will not create duplicate connections
    * Waits for connection to open before resolving
    */
   async start(): Promise<void> {
-    console.log('🎤 Starting Deepgram transcriber...');
+    console.log('🎤 [START] Attempting to start Deepgram transcriber...');
+    console.log(`   Current state: isConnected=${this.isConnected}, isStarting=${this.isStarting}, connection=${this.connection !== null}`);
+    
+    // IDEMPOTENCY CHECK: Already connected
+    if (this.isConnected && this.connection) {
+      console.log('✅ [START] Already connected and active - skipping start');
+      return;
+    }
+    
+    // IDEMPOTENCY CHECK: Already starting
+    if (this.isStarting) {
+      console.log('⏳ [START] Start already in progress - waiting for completion...');
+      if (this.connectionOpenPromise) {
+        await this.connectionOpenPromise;
+        console.log('✅ [START] Existing start operation completed');
+        return;
+      }
+      // If no promise exists but isStarting is true, something is wrong
+      console.warn('⚠️ [START] isStarting=true but no promise - resetting flag');
+      this.isStarting = false;
+    }
+    
+    // Mark as starting
+    this.isStarting = true;
+    console.log('🔄 [START] Setting isStarting=true');
+    
     const client = getDeepgramClient();
     
     if (!client) {
+      this.isStarting = false;
       const errorMsg = 'DEEPGRAM_API_KEY not configured or invalid - Cannot start transcription';
-      console.error(`❌ ${errorMsg}`);
+      console.error(`❌ [START] ${errorMsg}`);
       throw new Error(errorMsg);
     }
     
-    console.log('✅ Deepgram client obtained, proceeding with connection...');
+    console.log('✅ [START] Deepgram client obtained, proceeding with connection...');
 
     try {
       console.log('🔄 Initiating Deepgram connection...');
@@ -90,7 +120,8 @@ export class DeepgramTranscriber extends EventEmitter {
         // Timeout for connection
         const timeoutId = setTimeout(() => {
           if (!isResolved && !this.isConnected) {
-            console.error('❌ Deepgram connection timeout (5s)');
+            console.error('❌ [START] Deepgram connection timeout (5s)');
+            this.isStarting = false;
             isResolved = true;
             reject(new Error('Deepgram connection timeout'));
           }
@@ -98,9 +129,10 @@ export class DeepgramTranscriber extends EventEmitter {
         
         // Open handler - only resolve promise here
         const openHandler = () => {
-          console.log('✅ Deepgram connection opened successfully');
-          console.log('   [STATE CHANGE] isConnected: false → true');
+          console.log('✅ [START] Deepgram connection opened successfully');
+          console.log('   [STATE CHANGE] isConnected: false → true, isStarting: true → false');
           this.isConnected = true;
+          this.isStarting = false;
           
           if (!isResolved) {
             clearTimeout(timeoutId);
@@ -112,13 +144,16 @@ export class DeepgramTranscriber extends EventEmitter {
         
         // Error handler - reject promise if during connection phase
         const errorHandler = (error: any) => {
-          console.error('❌ Deepgram error event:', error);
+          console.error('❌ [ERROR] Deepgram error event handler triggered:', error);
           console.log(`   [STATE CHANGE] isConnected: ${this.isConnected} → false`);
+          console.log('   Error details:', JSON.stringify(error, null, 2));
           this.isConnected = false;
           this.emit('error', error);
           
           // Only reject promise during initial connection
           if (!isResolved) {
+            console.log('   [ERROR] Error occurred during start - rejecting promise and clearing isStarting');
+            this.isStarting = false;
             clearTimeout(timeoutId);
             isResolved = true;
             reject(error);
@@ -162,9 +197,12 @@ export class DeepgramTranscriber extends EventEmitter {
       });
 
       this.connection.on(LiveTranscriptionEvents.Close, () => {
-        console.log('🔌 Deepgram close event received');
-        console.log(`   [STATE CHANGE] isConnected: ${this.isConnected} → false`);
+        console.log('🔌 [CLOSE] Deepgram close event handler triggered.');
+        console.log(`   [STATE CHANGE] isConnected: ${this.isConnected} → false, isStarting: ${this.isStarting} → false`);
+        console.log('   Reason: Close event received from Deepgram');
         this.isConnected = false;
+        this.isStarting = false; // Clear in case connection closed during start
+        this.isStopping = false; // Clear stopping flag
         this.emit('close');
       });
 
@@ -180,12 +218,15 @@ export class DeepgramTranscriber extends EventEmitter {
       
       // Wait for connection to open before returning
       await this.connectionOpenPromise;
-      console.log('✅ start() returning - connection ready');
+      console.log('✅ [START] start() returning - connection ready');
+      console.log(`   Final state: isConnected=${this.isConnected}, isStarting=${this.isStarting}`);
       
     } catch (error) {
-      console.error('❌ Failed to start Deepgram transcription:', error);
+      console.error('❌ [START] Failed to start Deepgram transcription:', error);
       this.isConnected = false;
+      this.isStarting = false;
       this.connection = null;
+      this.connectionOpenPromise = null;
       throw error;
     }
   }
@@ -232,32 +273,55 @@ export class DeepgramTranscriber extends EventEmitter {
   }
 
   /**
-   * Flush any remaining audio and close the connection
+   * Flush any remaining audio and close the connection (IDEMPOTENT)
+   * Safe to call multiple times - will not error if already stopped
    */
   async stop(): Promise<void> {
-    console.log('🛑 Stopping Deepgram transcriber...');
+    console.log('🛑 [STOP] stop() method called on DeepgramTranscriber.');
+    console.log(`   Current state: isConnected=${this.isConnected}, isStarting=${this.isStarting}, isStopping=${this.isStopping}, connection=${this.connection !== null}`);
+    
+    // IDEMPOTENCY CHECK: Already stopped
+    if (!this.connection && !this.isConnected && !this.isStarting) {
+      console.log('✅ [STOP] Already stopped - nothing to do');
+      return;
+    }
+    
+    // IDEMPOTENCY CHECK: Already stopping
+    if (this.isStopping) {
+      console.log('⏳ [STOP] Stop already in progress - skipping');
+      return;
+    }
+    
+    // Mark as stopping
+    this.isStopping = true;
+    console.log('🔄 [STOP] Setting isStopping=true');
+    
+    // Force state to disconnected immediately to prevent audio forwarding during shutdown
+    console.log('🔒 [STOP] Setting isConnected=false immediately (before close)');
+    this.isConnected = false;
+    this.isStarting = false; // Cancel any pending start
     
     if (this.connection) {
       try {
+        console.log('📤 [STOP] Sending finish() to Deepgram...');
         // Send keepalive to finalize any pending transcripts
         this.connection.finish();
         
         // Wait a bit for close event to fire naturally
         await new Promise(resolve => setTimeout(resolve, 100));
         
-        // Force state update if close event didn't fire
-        if (this.isConnected) {
-          console.log('   Force setting isConnected = false');
-          this.isConnected = false;
-        }
+        console.log('✅ [STOP] Connection finish() completed');
       } catch (error) {
-        console.error('❌ Error closing Deepgram connection:', error);
-        this.isConnected = false;
+        console.error('❌ [STOP] Error closing Deepgram connection:', error);
+        // State already set to false above
       }
       this.connection = null;
+      this.connectionOpenPromise = null;
     }
     
-    console.log('✅ Transcriber stopped');
+    this.isStopping = false;
+    console.log('✅ [STOP] Transcriber stopped successfully');
+    console.log(`   Final state: isConnected=${this.isConnected}, isStarting=${this.isStarting}, isStopping=${this.isStopping}`);
   }
 
   /**
@@ -266,6 +330,29 @@ export class DeepgramTranscriber extends EventEmitter {
   isActive(): boolean {
     const active = this.isConnected && this.connection !== null;
     return active;
+  }
+
+  /**
+   * Check if connection is ready to send audio
+   * Verifies both the isConnected flag AND the actual WebSocket ready state
+   */
+  isConnectionReady(): boolean {
+    if (!this.connection || !this.isConnected) {
+      return false;
+    }
+    
+    try {
+      // Check WebSocket ready state (1 = OPEN)
+      const readyState = (this.connection as any).getReadyState?.();
+      if (readyState !== undefined && readyState !== 1) {
+        console.warn(`⚠️ Connection readyState mismatch: flag=${this.isConnected}, readyState=${readyState} (expected 1)`);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      // getReadyState might not exist, fall back to isConnected check
+      return this.isConnected;
+    }
   }
 }
 
