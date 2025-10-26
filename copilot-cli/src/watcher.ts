@@ -1,158 +1,101 @@
-import chokidar, { FSWatcher } from 'chokidar';
-import axios from 'axios';
+import chokidar from 'chokidar';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import chalk from 'chalk';
 
-interface FileWatcherOptions {
-  directory: string;
-  backendUrl: string;
-  extensions?: string[];
-  ignorePatterns?: string[];
-  debounceMs?: number;
-}
+/**
+ * Main file watcher function that monitors a directory and sends updates to the backend server
+ * @param directoryPath - The directory to watch
+ * @param serverUrl - The backend server URL
+ */
+export async function startWatcher(directoryPath: string, serverUrl: string): Promise<void> {
+  // Resolve the absolute path
+  const absolutePath = path.resolve(directoryPath);
 
-export class FileWatcher {
-  private watcher: FSWatcher | null = null;
-  private options: Required<FileWatcherOptions>;
-  private pendingUpdates: Map<string, NodeJS.Timeout> = new Map();
-
-  constructor(options: FileWatcherOptions) {
-    this.options = {
-      directory: path.resolve(options.directory),
-      backendUrl: options.backendUrl,
-      extensions: options.extensions || ['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.go', '.rs'],
-      ignorePatterns: options.ignorePatterns || ['node_modules/**', 'dist/**', '.git/**'],
-      debounceMs: options.debounceMs || 500,
-    };
+  // Verify directory exists
+  try {
+    await fs.access(absolutePath);
+  } catch (error) {
+    throw new Error(`Directory does not exist: ${absolutePath}`);
   }
 
-  async start(): Promise<void> {
-    // Verify directory exists
-    try {
-      await fs.access(this.options.directory);
-    } catch (error) {
-      throw new Error(`Directory does not exist: ${this.options.directory}`);
-    }
+  console.log(`👀 Starting file watcher...`);
+  console.log(`Directory: ${absolutePath}`);
+  console.log(`Backend: ${serverUrl}`);
 
-    // Test backend connection
-    await this.testConnection();
+  // Initialize chokidar watcher
+  const watcher = chokidar.watch(absolutePath, {
+    ignored: [
+      /(^|[\/\\])\../, // Ignore dotfiles and dot directories
+      '**/node_modules/**',
+      '**/.git/**',
+      '**/dist/**',
+      '**/build/**',
+    ],
+    persistent: true,
+    ignoreInitial: true, // Don't send updates for files existing at startup
+    awaitWriteFinish: {
+      stabilityThreshold: 500,
+      pollInterval: 100,
+    },
+  });
 
-    // Initialize chokidar watcher
-    this.watcher = chokidar.watch(this.options.directory, {
-      ignored: this.options.ignorePatterns,
-      persistent: true,
-      ignoreInitial: true, // Don't fire events for initial files
-      awaitWriteFinish: {
-        stabilityThreshold: 300,
-        pollInterval: 100,
-      },
-    });
+  // Handle 'change' event
+  watcher.on('change', async (filePath: string) => {
+    console.log(`File changed: ${filePath}`);
 
-    // Set up event handlers
-    this.watcher
-      .on('add', (filePath) => this.handleFileChange(filePath, 'added'))
-      .on('change', (filePath) => this.handleFileChange(filePath, 'modified'))
-      .on('unlink', (filePath) => this.handleFileDelete(filePath))
-      .on('error', (error) => console.error(chalk.red('Watcher error:'), error));
-
-    console.log(chalk.gray(`Watching extensions: ${this.options.extensions.join(', ')}`));
-  }
-
-  stop(): void {
-    if (this.watcher) {
-      this.watcher.close();
-      this.watcher = null;
-    }
-
-    // Clear pending updates
-    for (const timeout of this.pendingUpdates.values()) {
-      clearTimeout(timeout);
-    }
-    this.pendingUpdates.clear();
-
-    console.log(chalk.green('Watcher stopped'));
-  }
-
-  private async testConnection(): Promise<void> {
-    try {
-      const response = await axios.get(`${this.options.backendUrl}/health`, {
-        timeout: 5000,
-      });
-      
-      if (response.status === 200) {
-        console.log(chalk.green('✓ Backend connection successful'));
-      }
-    } catch (error) {
-      throw new Error(`Cannot connect to backend at ${this.options.backendUrl}. Please ensure the server is running.`);
-    }
-  }
-
-  private handleFileChange(filePath: string, action: 'added' | 'modified'): void {
-    // Check if file extension is in the watch list
-    const ext = path.extname(filePath);
-    if (!this.options.extensions.includes(ext)) {
-      return; // Skip files with unwanted extensions
-    }
-
-    // Clear existing timeout for this file
-    const existingTimeout = this.pendingUpdates.get(filePath);
-    if (existingTimeout) {
-      clearTimeout(existingTimeout);
-    }
-
-    // Set new debounced update
-    const timeout = setTimeout(() => {
-      this.sendFileUpdate(filePath, action);
-      this.pendingUpdates.delete(filePath);
-    }, this.options.debounceMs);
-
-    this.pendingUpdates.set(filePath, timeout);
-  }
-
-  private async handleFileDelete(filePath: string): Promise<void> {
-    // Clear any pending updates for this file
-    const existingTimeout = this.pendingUpdates.get(filePath);
-    if (existingTimeout) {
-      clearTimeout(existingTimeout);
-      this.pendingUpdates.delete(filePath);
-    }
-
-    // TODO: Optionally send delete notification to backend
-    console.log(chalk.yellow(`📝 File deleted: ${path.relative(this.options.directory, filePath)}`));
-  }
-
-  private async sendFileUpdate(filePath: string, action: 'added' | 'modified'): Promise<void> {
     try {
       // Read file content
       const content = await fs.readFile(filePath, 'utf-8');
-      const relativePath = path.relative(this.options.directory, filePath);
 
-      // Send to backend
-      await axios.post(
-        `${this.options.backendUrl}/api/update-file`,
-        {
-          filePath: relativePath,
-          content,
-          timestamp: Date.now(),
+      // Prepare payload
+      const payload = {
+        filePath: path.resolve(filePath),
+        content,
+      };
+
+      // Send update to backend using fetch
+      const response = await fetch(`${serverUrl}/api/update-file`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          timeout: 10000,
-        }
-      );
+        body: JSON.stringify(payload),
+      });
 
-      const actionEmoji = action === 'added' ? '➕' : '📝';
-      console.log(chalk.blue(`${actionEmoji} File ${action}: ${relativePath}`));
-      
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        console.error(chalk.red(`Failed to send update for ${filePath}:`), error.message);
+      if (response.ok) {
+        console.log(`✅ Updated context for ${filePath}`);
       } else {
-        console.error(chalk.red(`Error reading file ${filePath}:`), error);
+        const errorText = await response.text();
+        console.error(`❌ Failed to update context for ${filePath}: ${response.status} ${errorText}`);
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error(`❌ Failed to update context for ${filePath}: ${error.message}`);
+      } else {
+        console.error(`❌ Failed to update context for ${filePath}:`, error);
       }
     }
-  }
+  });
+
+  // Handle 'error' event
+  watcher.on('error', (error: Error) => {
+    console.error(`Watcher error: ${error}`);
+  });
+
+  // Handle 'ready' event
+  watcher.on('ready', () => {
+    console.log(`👀 Initial scan complete. Ready for changes in ${absolutePath}...`);
+  });
+
+  // Handle graceful shutdown
+  process.on('SIGINT', () => {
+    console.log('\n\nShutting down watcher...');
+    watcher.close();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', () => {
+    watcher.close();
+    process.exit(0);
+  });
 }

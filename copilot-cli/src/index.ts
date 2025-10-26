@@ -1,56 +1,42 @@
 #!/usr/bin/env node
 
-import 'dotenv/config';
-import { Command } from 'commander';
-import { FileWatcher } from './watcher';
-import chalk from 'chalk';
+import yargs from 'yargs';
+import { hideBin } from 'yargs/helpers';
+import { startWatcher } from './watcher';
 
-const program = new Command();
-
-program
-  .name('copilot-watch')
-  .description('Watch files and send updates to the Code Co-Pilot backend')
+const argv = yargs(hideBin(process.argv))
+  .usage('Usage: $0 <directory> [options]')
+  .command('$0 <directory>', 'Watch a directory for file changes', (yargs: any) => {
+    return yargs.positional('directory', {
+      describe: 'Directory path to watch',
+      type: 'string',
+      demandOption: true,
+    });
+  })
+  .option('server-url', {
+    alias: 's',
+    type: 'string',
+    description: 'Backend server URL',
+    default: 'http://localhost:3001',
+  })
+  .example('$0 ./src', 'Watch the src directory')
+  .example('$0 ./src --server-url http://localhost:3001', 'Watch src with custom server URL')
+  .help()
+  .alias('help', 'h')
   .version('1.0.0')
-  .argument('[directory]', 'Directory to watch', process.cwd())
-  .option('-u, --url <url>', 'Backend API URL', process.env.BACKEND_URL || 'http://localhost:3001')
-  .option('-e, --extensions <extensions>', 'File extensions to watch (comma-separated)', process.env.WATCH_EXTENSIONS)
-  .option('-i, --ignore <patterns>', 'Patterns to ignore (comma-separated)', 'node_modules/**,dist/**,.git/**')
-  .option('-d, --debounce <ms>', 'Debounce time in milliseconds', process.env.DEBOUNCE_MS || '500')
-  .action(async (directory: string, options) => {
-    try {
-      console.log(chalk.blue.bold('\n🚀 Code Co-Pilot File Watcher\n'));
-      console.log(chalk.gray(`Watching: ${directory}`));
-      console.log(chalk.gray(`Backend: ${options.url}`));
-      
-      const watcher = new FileWatcher({
-        directory,
-        backendUrl: options.url,
-        extensions: options.extensions ? options.extensions.split(',') : undefined,
-        ignorePatterns: options.ignore.split(','),
-        debounceMs: parseInt(options.debounce),
-      });
+  .alias('version', 'v')
+  .parseSync();
 
-      await watcher.start();
-      
-      console.log(chalk.green('\n✓ Watcher started successfully!\n'));
-      console.log(chalk.yellow('Press Ctrl+C to stop watching...\n'));
+async function main() {
+  const directory = argv.directory as string;
+  const serverUrl = argv['server-url'] as string;
 
-      // Handle graceful shutdown
-      process.on('SIGINT', () => {
-        console.log(chalk.yellow('\n\nShutting down watcher...'));
-        watcher.stop();
-        process.exit(0);
-      });
+  try {
+    await startWatcher(directory, serverUrl);
+  } catch (error) {
+    console.error('Error:', error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
+}
 
-      process.on('SIGTERM', () => {
-        watcher.stop();
-        process.exit(0);
-      });
-
-    } catch (error) {
-      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
-      process.exit(1);
-    }
-  });
-
-program.parse();
+main();
