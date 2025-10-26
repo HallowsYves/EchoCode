@@ -2,7 +2,8 @@ import chokidar from 'chokidar';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
-// Hello
+
+
 /**
  * Main file watcher function that monitors a directory and sends updates to the backend server
  * @param directoryPath - The directory to watch
@@ -23,27 +24,8 @@ export async function startWatcher(directoryPath: string, serverUrl: string): Pr
   console.log(`Directory: ${absolutePath}`);
   console.log(`Backend: ${serverUrl}`);
 
-  // Initialize chokidar watcher
-  const watcher = chokidar.watch(absolutePath, {
-    ignored: [
-      /(^|[\/\\])\../, // Ignore dotfiles and dot directories
-      '**/node_modules/**',
-      '**/.git/**',
-      '**/dist/**',
-      '**/build/**',
-    ],
-    persistent: true,
-    ignoreInitial: true, // Don't send updates for files existing at startup
-    awaitWriteFinish: {
-      stabilityThreshold: 500,
-      pollInterval: 100,
-    },
-  });
-
-  // Handle 'change' event
-  watcher.on('change', async (filePath: string) => {
-    console.log(`File changed: ${filePath}`);
-
+  // Shared function to send file updates to backend
+  async function sendFileUpdate(filePath: string, serverUrl: string): Promise<void> {
     try {
       // Read file content
       const content = await fs.readFile(filePath, 'utf-8');
@@ -76,6 +58,35 @@ export async function startWatcher(directoryPath: string, serverUrl: string): Pr
         console.error(`❌ Failed to update context for ${filePath}:`, error);
       }
     }
+  }
+
+  // Initialize chokidar watcher
+  const watcher = chokidar.watch(absolutePath, {
+    ignored: [
+      /(^|[\/\\])\../, // Ignore dotfiles and dot directories
+      '**/node_modules/**',
+      '**/.git/**',
+      '**/dist/**',
+      '**/build/**',
+    ],
+    persistent: true,
+    ignoreInitial: true, // Don't send updates for files existing at startup
+    awaitWriteFinish: {
+      stabilityThreshold: 500,
+      pollInterval: 100,
+    },
+  });
+
+  // Handle 'add' event
+  watcher.on('add', async (filePath: string) => {
+    console.log(`File added: ${filePath}`);
+    await sendFileUpdate(filePath, serverUrl);
+  });
+
+  // Handle 'change' event
+  watcher.on('change', async (filePath: string) => {
+    console.log(`File changed: ${filePath}`);
+    await sendFileUpdate(filePath, serverUrl);
   });
 
   // Handle 'error' event
