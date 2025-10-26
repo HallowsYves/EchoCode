@@ -48,6 +48,21 @@ server.listen(PORT, () => {
   console.log(`🔌 WebSocket server ready on ws://localhost:${PORT}/ws`);
 });
 
+// Global error handlers (last resort - specific try-catch blocks are preferred)
+process.on('uncaughtException', (error) => {
+  console.error('💥 UNCAUGHT EXCEPTION! Server stability compromised:', error);
+  console.error('Stack trace:', error.stack);
+  // Log but don't crash - let the server attempt to recover
+  // In production, you might want to implement graceful shutdown here
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 UNHANDLED PROMISE REJECTION!');
+  console.error('Promise:', promise);
+  console.error('Reason:', reason);
+  // Log the rejection but don't crash
+});
+
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully...');

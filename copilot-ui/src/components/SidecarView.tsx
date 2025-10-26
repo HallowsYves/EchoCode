@@ -12,6 +12,7 @@ export default function SidecarView() {
   const [aiResponse, setAiResponse] = useState<string>('');
   const [isConnected, setIsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [textInput, setTextInput] = useState<string>('');
   
   // Refs for Media Source Extensions
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
@@ -302,6 +303,32 @@ export default function SidecarView() {
     console.log('✅ Session ended');
   }, [stopRecording, clearAudio, sendMessage]);
 
+  const handleSendTextMessage = useCallback(() => {
+    const trimmedText = textInput.trim();
+    
+    if (trimmedText && isConnected) {
+      console.log('💬 Sending text message:', trimmedText);
+      
+      // Send text input to server
+      sendMessage(JSON.stringify({
+        type: 'text_input',
+        message: trimmedText
+      }));
+      
+      // Update local transcript for immediate feedback
+      setTranscript(`You (Typed): ${trimmedText}`);
+      
+      // Clear input field
+      setTextInput('');
+    }
+  }, [textInput, isConnected, sendMessage]);
+
+  const handleTextInputKeyPress = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSendTextMessage();
+    }
+  }, [handleSendTextMessage]);
+
   const handleStartStop = useCallback(() => {
     if (isRecording) {
       stopRecording();
@@ -351,6 +378,29 @@ export default function SidecarView() {
             <p className="text-gray-800 whitespace-pre-wrap">
               {aiResponse || 'AI responses will appear here...'}
             </p>
+          </div>
+
+          {/* Text Input Section */}
+          <div className="border-t pt-4">
+            <h3 className="text-sm font-semibold text-gray-600 mb-2">Type a Message</h3>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                onKeyPress={handleTextInputKeyPress}
+                placeholder="Type your message here..."
+                disabled={!isConnected}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+              />
+              <button
+                onClick={handleSendTextMessage}
+                disabled={!isConnected || !textInput.trim()}
+                className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-all disabled:bg-gray-300 disabled:cursor-not-allowed shadow-md"
+              >
+                Send
+              </button>
+            </div>
           </div>
 
           {/* Controls */}

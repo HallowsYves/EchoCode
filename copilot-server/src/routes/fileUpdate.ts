@@ -31,17 +31,26 @@ fileUpdateRouter.post('/update-file', async (req: Request, res: Response) => {
 
     console.log(`📝 File updated: ${filePath} (${content.length} bytes)`);
 
-    res.json({
-      success: true,
-      filePath,
-      cacheSize: fileCache.size
-    });
+    try {
+      res.json({
+        success: true,
+        filePath,
+        cacheSize: fileCache.size
+      });
+    } catch (sendError) {
+      console.error('❌ [HTTP SEND ERROR] Failed to send response:', sendError);
+      // Response may have already been sent or connection closed
+    }
   } catch (error) {
     console.error('Error updating file:', error);
-    res.status(500).json({
-      error: 'Failed to update file',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
+    try {
+      res.status(500).json({
+        error: 'Failed to update file',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    } catch (sendError) {
+      console.error('❌ [HTTP SEND ERROR] Failed to send error response:', sendError);
+    }
   }
 });
 
@@ -57,12 +66,20 @@ fileUpdateRouter.get('/files', (req: Request, res: Response) => {
       lastModified: data.lastModified
     }));
 
-    res.json({ files, count: files.length });
+    try {
+      res.json({ files, count: files.length });
+    } catch (sendError) {
+      console.error('❌ [HTTP SEND ERROR] Failed to send file list response:', sendError);
+    }
   } catch (error) {
     console.error('Error listing files:', error);
-    res.status(500).json({
-      error: 'Failed to list files',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
+    try {
+      res.status(500).json({
+        error: 'Failed to list files',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    } catch (sendError) {
+      console.error('❌ [HTTP SEND ERROR] Failed to send error response:', sendError);
+    }
   }
 });

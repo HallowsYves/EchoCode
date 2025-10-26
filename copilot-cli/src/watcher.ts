@@ -2,6 +2,7 @@ import chokidar from 'chokidar';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
+// Hi testing!!
 /**
  * Main file watcher function that monitors a directory and sends updates to the backend server
  * @param directoryPath - The directory to watch
