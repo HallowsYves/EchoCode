@@ -599,56 +599,56 @@ this MUST be changed or audio will NOT play!
   }, [isRecording, stopRecording, sendMessage, initializeMediaSource, startRecording]);
 
   return (
-    <div className="flex items-center justify-center min-h-screen p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden">
+    <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 w-full max-w-2xl overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-4">
           <h1 className="text-white text-2xl font-bold">Code Co-Pilot</h1>
           <p className="text-blue-100 text-sm">
-            {isConnected ? ' Connected' : ' Disconnected'}
+            {isConnected ? 'Connected' : 'Disconnected'}
           </p>
         </div>
 
         {/* Main Content */}
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-4">
           {/* Status Indicator */}
           {processingState !== 'idle' && (
             <div className={`text-center py-2 px-4 rounded-lg font-medium ${
-              processingState === 'listening' ? 'bg-green-100 text-green-800' :
-              processingState === 'processing' ? 'bg-yellow-100 text-yellow-800 animate-pulse' :
-              'bg-blue-100 text-blue-800'
+              processingState === 'listening' ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' :
+              processingState === 'processing' ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 animate-pulse' :
+              'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
             }`}>
               {processingState === 'listening' && '🎤 Listening...'}
-              {processingState === 'processing' && ' AI is thinking...'}
+              {processingState === 'processing' && '🤔 AI is thinking...'}
               {processingState === 'speaking' && '🔊 AI Speaking...'}
             </div>
           )}
 
           {/* Transcript Display */}
-          <div className={`rounded-lg p-4 min-h-[100px] transition-colors ${
-            processingState === 'listening' ? 'bg-green-50 border-2 border-green-300' : 'bg-gray-50'
+          <div className={`rounded-lg p-4 min-h-[100px] transition-colors bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 ${
+            processingState === 'listening' ? 'ring-2 ring-green-400 dark:ring-green-500' : ''
           }`}>
-            <h3 className="text-sm font-semibold text-gray-600 mb-2">Your Message</h3>
-            <p className="text-gray-800">
+            <h3 className="font-semibold text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Your Message</h3>
+            <p className="text-gray-800 dark:text-gray-200">
               {transcript || 'Start speaking to see your transcript here...'}
             </p>
           </div>
 
           {/* AI Response Display */}
-          <div className={`rounded-lg p-4 min-h-[150px] transition-colors ${
-            processingState === 'processing' ? 'bg-yellow-50 border-2 border-yellow-300' :
-            processingState === 'speaking' ? 'bg-blue-100 border-2 border-blue-400' :
-            'bg-blue-50'
+          <div className={`rounded-lg p-4 min-h-[150px] transition-colors bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 ${
+            processingState === 'processing' ? 'ring-2 ring-yellow-400 dark:ring-yellow-500' :
+            processingState === 'speaking' ? 'ring-2 ring-blue-400 dark:ring-blue-500' :
+            ''
           }`}>
-            <h3 className="text-sm font-semibold text-blue-600 mb-2">AI Response</h3>
-            <p className="text-gray-800 whitespace-pre-wrap">
+            <h3 className="font-semibold text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">AI Response</h3>
+            <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
               {aiResponse || 'AI responses will appear here...'}
             </p>
           </div>
 
           {/* Text Input Section */}
-          <div className="border-t pt-4">
-            <h3 className="text-sm font-semibold text-gray-600 mb-2">Type a Message</h3>
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+            <h3 className="font-semibold text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Type a Message</h3>
             <div className="flex gap-2">
               <input
                 type="text"
@@ -657,12 +657,12 @@ this MUST be changed or audio will NOT play!
                 onKeyPress={handleTextInputKeyPress}
                 placeholder="Type your message here..."
                 disabled={!isConnected}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed"
               />
               <button
                 onClick={handleSendTextMessage}
                 disabled={!isConnected || !textInput.trim()}
-                className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-all disabled:bg-gray-300 disabled:cursor-not-allowed shadow-md"
+                className="px-4 py-2 bg-blue-500 hover:opacity-80 text-white rounded-lg font-medium transition-opacity duration-150 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed border border-transparent"
               >
                 Send
               </button>
@@ -674,11 +674,11 @@ this MUST be changed or audio will NOT play!
             <button
               onClick={handleStartStop}
               disabled={!isConnected}
-              className={`flex items-center justify-center w-16 h-16 rounded-full transition-all ${
+              className={`flex items-center justify-center w-16 h-16 rounded-full transition-all border ${
                 isRecording
-                  ? 'bg-red-500 hover:bg-red-600 animate-pulse'
-                  : 'bg-blue-500 hover:bg-blue-600'
-              } disabled:bg-gray-300 disabled:cursor-not-allowed shadow-lg`}
+                  ? 'bg-red-500 hover:opacity-80 animate-pulse border-transparent'
+                  : 'bg-blue-500 hover:opacity-80 border dark:border-gray-600'
+              } disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed shadow-lg`}
               title={isRecording ? 'Stop Recording' : 'Start Recording'}
             >
               {isRecording ? (
@@ -700,18 +700,18 @@ this MUST be changed or audio will NOT play!
             <button
               onClick={handleMuteToggle}
               disabled={!isConnected}
-              className={`px-6 py-3 rounded-lg font-medium transition-all ${
+              className={`px-4 py-2 rounded-lg font-medium transition-opacity duration-150 hover:opacity-80 border ${
                 isMuted
-                  ? 'bg-yellow-500 hover:bg-yellow-600'
-                  : 'bg-green-500 hover:bg-green-600'
-              } text-white disabled:bg-gray-300 disabled:cursor-not-allowed shadow-md`}
+                  ? 'bg-gray-500 hover:bg-gray-600 border-gray-600'
+                  : 'bg-indigo-500 hover:bg-indigo-600 border-transparent'
+              } text-white disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed`}
             >
-              {isMuted ? '🔇 Unmute' : '🔊 Mute'}
+              {isMuted ? '🔇 Mute' : '🔊 Unmute'}
             </button>
 
             <button
               onClick={handleClear}
-              className="px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-all shadow-md"
+              className="px-4 py-2 bg-yellow-500 hover:opacity-80 text-white rounded-lg font-medium transition-opacity duration-150 border border-transparent"
               title="Clear transcript and AI response"
             >
               🧹 Clear
@@ -719,13 +719,13 @@ this MUST be changed or audio will NOT play!
 
             <button
               onClick={handleEndSession}
-              className="px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-all shadow-md"
+              className="px-4 py-2 bg-gray-600 hover:opacity-80 text-white rounded-lg font-medium transition-opacity duration-150 border border-gray-600"
             >
               End Session
             </button>
           </div>
 
-          <div className="text-center text-sm text-gray-500">
+          <div className="text-center text-sm text-gray-500 dark:text-gray-400">
             Status: {connectionStatus}
           </div>
         </div>
