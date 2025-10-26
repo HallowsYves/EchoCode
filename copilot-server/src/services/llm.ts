@@ -40,12 +40,12 @@ export async function getClaudeResponse(userMessage: string, fileContext?: strin
     }
 
     // Build conversational system prompt
-    const systemPrompt = `You are an AI code co-pilot providing quick, conversational updates. When asked about code changes or file contents based on the provided context, respond like you're briefing a colleague. Be concise (1-3 sentences if possible), focus on the main point, and use natural language. Avoid lists or overly formal explanations unless specifically asked. If no file context is provided or relevant, state that clearly but politely.`;
+    const systemPrompt = `You are a super brief AI code co-pilot. Provide extremely concise (1-2 sentences maximum) answers to user queries based *only* on the provided context. Get straight to the point. Do not add conversational filler.`;
 
     // Call Claude API
     const response = await client.messages.create({
       model: 'claude-3-haiku-20240307',
-      max_tokens: 300,
+      max_tokens: 100,
       system: systemPrompt,
       messages: [
         {
