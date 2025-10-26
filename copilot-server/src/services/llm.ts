@@ -33,11 +33,10 @@ export async function getClaudeResponse(userMessage: string, fileContext?: strin
   try {
     const client = getAnthropicClient();
 
-    // If fileContext not provided, get it from cache
+    // If fileContext not provided, get it from cache using semantic search
     let contextToUse = fileContext;
     if (!contextToUse) {
-      const keywords = extractKeywords(userMessage);
-      contextToUse = fileCache.getRelevantContext(keywords);
+      contextToUse = await fileCache.searchSemanticContext(userMessage, 5);
     }
 
     // Build conversational system prompt
@@ -84,23 +83,6 @@ export async function getClaudeResponse(userMessage: string, fileContext?: strin
     
     throw error;
   }
-}
-
-/**
- * Extract keywords from user message for context retrieval
- * Simple implementation - can be enhanced with NLP
- */
-function extractKeywords(message: string): string[] {
-  // Remove common words and extract potential file/code-related terms
-  const commonWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for']);
-  
-  const words = message
-    .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
-    .split(/\s+/)
-    .filter(word => word.length > 2 && !commonWords.has(word));
-  
-  return words;
 }
 
 /**

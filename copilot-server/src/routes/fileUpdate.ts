@@ -23,8 +23,8 @@ fileUpdateRouter.post('/update-file', async (req: Request, res: Response) => {
       });
     }
 
-    // Update file cache
-    fileCache.set(filePath, {
+    // Update file cache (with async embedding generation)
+    await fileCache.set(filePath, {
       content,
       lastModified: timestamp || Date.now()
     });
