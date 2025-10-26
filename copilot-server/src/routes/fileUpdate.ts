@@ -83,3 +83,59 @@ fileUpdateRouter.get('/files', (req: Request, res: Response) => {
     }
   }
 });
+
+/**
+ * POST /api/delete-file
+ * Receives file deletion notifications from the CLI watcher
+ */
+fileUpdateRouter.post('/delete-file', async (req: Request, res: Response) => {
+  try {
+    const { filePath } = req.body;
+
+    if (!filePath) {
+      return res.status(400).json({
+        error: 'Missing required field: filePath'
+      });
+    }
+
+    // Remove file from cache and vector index
+    const removed = await fileCache.removeFile(filePath);
+
+    if (removed) {
+      console.log(`🗑️ File removed: ${filePath}`);
+      
+      try {
+        res.json({
+          success: true,
+          filePath,
+          cacheSize: fileCache.size
+        });
+      } catch (sendError) {
+        console.error('❌ [HTTP SEND ERROR] Failed to send response:', sendError);
+      }
+    } else {
+      console.warn(`⚠️ File not found in cache: ${filePath}`);
+      
+      try {
+        res.json({
+          success: false,
+          filePath,
+          message: 'File not found in cache',
+          cacheSize: fileCache.size
+        });
+      } catch (sendError) {
+        console.error('❌ [HTTP SEND ERROR] Failed to send response:', sendError);
+      }
+    }
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    try {
+      res.status(500).json({
+        error: 'Failed to delete file',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    } catch (sendError) {
+      console.error('❌ [HTTP SEND ERROR] Failed to send error response:', sendError);
+    }
+  }
+});

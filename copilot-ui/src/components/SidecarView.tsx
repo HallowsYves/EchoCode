@@ -618,9 +618,9 @@ this MUST be changed or audio will NOT play!
               processingState === 'processing' ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 animate-pulse' :
               'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
             }`}>
-              {processingState === 'listening' && '🎤 Listening...'}
-              {processingState === 'processing' && '🤔 AI is thinking...'}
-              {processingState === 'speaking' && '🔊 AI Speaking...'}
+              {processingState === 'listening' && ' Listening...'}
+              {processingState === 'processing' && ' AI is thinking...'}
+              {processingState === 'speaking' && ' AI Speaking...'}
             </div>
           )}
 

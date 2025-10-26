@@ -2,7 +2,7 @@ import chokidar from 'chokidar';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
-
+// Some change
 
 /**
  * Main file watcher function that monitors a directory and sends updates to the backend server
@@ -60,6 +60,38 @@ export async function startWatcher(directoryPath: string, serverUrl: string): Pr
     }
   }
 
+  // Function to send file deletion notification to backend
+  async function sendDeleteNotification(filePath: string, serverUrl: string): Promise<void> {
+    try {
+      // Prepare payload with absolute file path
+      const payload = {
+        filePath: path.resolve(filePath),
+      };
+
+      // Send delete notification to backend using fetch
+      const response = await fetch(`${serverUrl}/api/delete-file`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        console.log(`✅ Removed from cache: ${filePath}`);
+      } else {
+        const errorText = await response.text();
+        console.error(`❌ Failed to remove from cache: ${filePath}: ${response.status} ${errorText}`);
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error(`❌ Failed to remove from cache: ${filePath}: ${error.message}`);
+      } else {
+        console.error(`❌ Failed to remove from cache: ${filePath}:`, error);
+      }
+    }
+  }
+
   // Initialize chokidar watcher
   const watcher = chokidar.watch(absolutePath, {
     ignored: [
@@ -101,6 +133,12 @@ export async function startWatcher(directoryPath: string, serverUrl: string): Pr
   watcher.on('change', async (filePath: string) => {
     console.log(`File changed: ${filePath}`);
     await sendFileUpdate(filePath, serverUrl);
+  });
+
+  // Handle 'unlink' event for file deletion
+  watcher.on('unlink', async (filePath: string) => {
+    console.log(`🗑️ File deleted: ${filePath}`);
+    await sendDeleteNotification(filePath, serverUrl);
   });
 
   // Handle 'error' event

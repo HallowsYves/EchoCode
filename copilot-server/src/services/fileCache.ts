@@ -215,6 +215,44 @@ export class FileCache {
   }
 
   /**
+   * Remove a file from both the cache and vector index
+   * @param filePath Path of the file to remove
+   * @returns true if file was found and removed, false otherwise
+   */
+  async removeFile(filePath: string): Promise<boolean> {
+    try {
+      console.log(`🗑️ [CACHE] Removing file: ${filePath}`);
+
+      // Check if file exists in cache
+      const exists = this.cache.has(filePath);
+      
+      if (!exists) {
+        console.warn(`⚠️ [CACHE] File not found in cache: ${filePath}`);
+        return false;
+      }
+
+      // Delete from cache
+      this.cache.delete(filePath);
+      console.log(`✅ [CACHE] Removed from cache: ${filePath}`);
+
+      // Remove from vector index
+      try {
+        await this._initializeVectorIndex(); // Ensure index is ready
+        await this.vectorIndex.deleteItem(filePath);
+        console.log(`✅ [VECTOR_INDEX] Removed from index: ${filePath}`);
+      } catch (indexError) {
+        console.error(`❌ [VECTOR_INDEX] Failed to remove ${filePath} from index:`, indexError);
+        // Don't fail the entire operation if index removal fails
+      }
+
+      return true;
+    } catch (error) {
+      console.error(`❌ [CACHE] Error removing file ${filePath}:`, error);
+      return false;
+    }
+  }
+
+  /**
    * Search for relevant code context using semantic similarity
    * @param query User's question or search query
    * @param topK Number of most relevant files to return (default: 5)
