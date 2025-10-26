@@ -58,6 +58,7 @@ export default function SidecarView() {
   const [isConnected, setIsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [textInput, setTextInput] = useState<string>('');
+  const [processingState, setProcessingState] = useState<'idle' | 'listening' | 'processing' | 'speaking'>('idle');
   
   // Refs for Media Source Extensions
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
@@ -375,6 +376,8 @@ this MUST be changed or audio will NOT play!
         case 'transcript':
           if (message.isFinal) {
             setTranscript(message.data);
+            // Final transcript received, AI is now processing
+            setProcessingState('processing');
           } else {
             setTranscript(message.data + '...');
           }
@@ -385,11 +388,17 @@ this MUST be changed or audio will NOT play!
           break;
 
         case 'audio':
+          // First audio chunk received, AI is now speaking
+          if (processingState !== 'speaking') {
+            setProcessingState('speaking');
+          }
           handleAudioChunk(message.data, message.format || 'mp3');
           break;
 
         case 'audio_end':
           console.log('✅ [MSE] Audio stream ended, total chunks:', message.totalChunks);
+          // Audio playback ended, return to idle
+          setProcessingState('idle');
           break;
 
         case 'recording_started':
@@ -403,6 +412,8 @@ this MUST be changed or audio will NOT play!
         case 'error':
           console.error('❌ Server error:', message.message);
           alert('Error: ' + message.message);
+          // Reset to idle on error
+          setProcessingState('idle');
           break;
 
         default:
@@ -509,9 +520,17 @@ this MUST be changed or audio will NOT play!
     
     setTranscript('');
     setAiResponse('');
+    setProcessingState('idle');
     
     console.log('✅ Session ended');
   }, [stopRecording, clearAudio, sendMessage]);
+
+  const handleClear = useCallback(() => {
+    console.log('🧹 Clearing transcript and AI response...');
+    setTranscript('');
+    setAiResponse('');
+    setProcessingState('idle');
+  }, []);
 
   const handleSendTextMessage = useCallback(() => {
     const trimmedText = textInput.trim();
@@ -534,6 +553,9 @@ this MUST be changed or audio will NOT play!
       // Update local transcript for immediate feedback
       setTranscript(`You (Typed): ${trimmedText}`);
       
+      // Set state to processing as AI is thinking
+      setProcessingState('processing');
+      
       // Clear input field
       setTextInput('');
     }
@@ -553,6 +575,9 @@ this MUST be changed or audio will NOT play!
         type: 'stop_recording'
       }));
       
+      // Recording stopped, no longer listening
+      setProcessingState('idle');
+      
     } else {
       // Ensure MediaSource is initialized (redundant check, but safe)
       if (!mediaSourceRef.current && audioElementRef.current) {
@@ -563,6 +588,9 @@ this MUST be changed or audio will NOT play!
       sendMessage(JSON.stringify({
         type: 'start_recording'
       }));
+      
+      // Set state to listening when recording starts
+      setProcessingState('listening');
       
       setTimeout(() => {
         startRecording();
@@ -577,14 +605,29 @@ this MUST be changed or audio will NOT play!
         <div className="bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-4">
           <h1 className="text-white text-2xl font-bold">Code Co-Pilot</h1>
           <p className="text-blue-100 text-sm">
-            {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
+            {isConnected ? ' Connected' : ' Disconnected'}
           </p>
         </div>
 
         {/* Main Content */}
         <div className="p-6 space-y-6">
+          {/* Status Indicator */}
+          {processingState !== 'idle' && (
+            <div className={`text-center py-2 px-4 rounded-lg font-medium ${
+              processingState === 'listening' ? 'bg-green-100 text-green-800' :
+              processingState === 'processing' ? 'bg-yellow-100 text-yellow-800 animate-pulse' :
+              'bg-blue-100 text-blue-800'
+            }`}>
+              {processingState === 'listening' && '🎤 Listening...'}
+              {processingState === 'processing' && ' AI is thinking...'}
+              {processingState === 'speaking' && '🔊 AI Speaking...'}
+            </div>
+          )}
+
           {/* Transcript Display */}
-          <div className="bg-gray-50 rounded-lg p-4 min-h-[100px]">
+          <div className={`rounded-lg p-4 min-h-[100px] transition-colors ${
+            processingState === 'listening' ? 'bg-green-50 border-2 border-green-300' : 'bg-gray-50'
+          }`}>
             <h3 className="text-sm font-semibold text-gray-600 mb-2">Your Message</h3>
             <p className="text-gray-800">
               {transcript || 'Start speaking to see your transcript here...'}
@@ -592,7 +635,11 @@ this MUST be changed or audio will NOT play!
           </div>
 
           {/* AI Response Display */}
-          <div className="bg-blue-50 rounded-lg p-4 min-h-[150px]">
+          <div className={`rounded-lg p-4 min-h-[150px] transition-colors ${
+            processingState === 'processing' ? 'bg-yellow-50 border-2 border-yellow-300' :
+            processingState === 'speaking' ? 'bg-blue-100 border-2 border-blue-400' :
+            'bg-blue-50'
+          }`}>
             <h3 className="text-sm font-semibold text-blue-600 mb-2">AI Response</h3>
             <p className="text-gray-800 whitespace-pre-wrap">
               {aiResponse || 'AI responses will appear here...'}
@@ -623,7 +670,7 @@ this MUST be changed or audio will NOT play!
           </div>
 
           {/* Controls */}
-          <div className="flex items-center justify-center gap-4">
+          <div className="flex items-center justify-center gap-4 flex-wrap">
             <button
               onClick={handleStartStop}
               disabled={!isConnected}
@@ -646,7 +693,7 @@ this MUST be changed or audio will NOT play!
                     d="M10 18a8 8 0 100-16 8 8 0 000 16zm0-2a6 6 0 100-12 6 6 0 000 12z"
                     clipRule="evenodd"
                   />
-                </svg>
+                  </svg>
               )}
             </button>
 
@@ -660,6 +707,14 @@ this MUST be changed or audio will NOT play!
               } text-white disabled:bg-gray-300 disabled:cursor-not-allowed shadow-md`}
             >
               {isMuted ? '🔇 Unmute' : '🔊 Mute'}
+            </button>
+
+            <button
+              onClick={handleClear}
+              className="px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-all shadow-md"
+              title="Clear transcript and AI response"
+            >
+              🧹 Clear
             </button>
 
             <button
