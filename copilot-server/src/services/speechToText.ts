@@ -1,18 +1,42 @@
 import { createClient, LiveTranscriptionEvents, LiveClient } from '@deepgram/sdk';
 import { EventEmitter } from 'events';
 
-// TODO: Set DEEPGRAM_API_KEY environment variable in .env file
-const deepgramApiKey = process.env.DEEPGRAM_API_KEY || '';
+// CRITICAL: DEEPGRAM_API_KEY must be set in .env.local file
+// The API key is validated before each client creation
+const deepgramApiKey = process.env.DEEPGRAM_API_KEY;
 
 let deepgramClient: ReturnType<typeof createClient> | null = null;
 
 /**
  * Initialize Deepgram client
+ * Performs strict validation of API key before creation
  */
 function getDeepgramClient() {
-  if (!deepgramClient && deepgramApiKey) {
-    deepgramClient = createClient(deepgramApiKey);
+  // Strict API key validation
+  if (!deepgramApiKey || deepgramApiKey.trim() === '') {
+    console.error('\n--------------------------------------------------------------');
+    console.error('FATAL ERROR: DEEPGRAM_API_KEY environment variable is not set or empty.');
+    console.error('Please:');
+    console.error('1. Check that you have a .env.local file in copilot-server/');
+    console.error('2. Add: DEEPGRAM_API_KEY=your_key_here');
+    console.error('3. Restart the server');
+    console.error('--------------------------------------------------------------\n');
+    return null;
   }
+  
+  if (!deepgramClient) {
+    console.log('🔄 Attempting to create Deepgram client...');
+    console.log(`   API Key (first 8/last 4 chars): ${deepgramApiKey.slice(0, 8)}...${deepgramApiKey.slice(-4)}`);
+    
+    try {
+      deepgramClient = createClient(deepgramApiKey);
+      console.log('✅ Deepgram client created successfully');
+    } catch (error) {
+      console.error('❌ Failed to create Deepgram client:', error);
+      return null;
+    }
+  }
+  
   return deepgramClient;
 }
 
@@ -34,12 +58,16 @@ export class DeepgramTranscriber extends EventEmitter {
    * Waits for connection to open before resolving
    */
   async start(): Promise<void> {
+    console.log('🎤 Starting Deepgram transcriber...');
     const client = getDeepgramClient();
     
     if (!client) {
-      console.error('Deepgram API key not configured');
-      throw new Error('DEEPGRAM_API_KEY not configured in environment variables');
+      const errorMsg = 'DEEPGRAM_API_KEY not configured or invalid - Cannot start transcription';
+      console.error(`❌ ${errorMsg}`);
+      throw new Error(errorMsg);
     }
+    
+    console.log('✅ Deepgram client obtained, proceeding with connection...');
 
     try {
       console.log('🔄 Initiating Deepgram connection...');

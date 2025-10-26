@@ -1,4 +1,14 @@
 import 'dotenv/config';
+
+// Verify critical environment variables at startup
+console.log('========================================');
+console.log('🔧 Environment Variables Check:');
+console.log('   PORT:', process.env.PORT || '3001 (default)');
+console.log('   DEEPGRAM_API_KEY:', process.env.DEEPGRAM_API_KEY ? `✅ Loaded (${process.env.DEEPGRAM_API_KEY.slice(0, 8)}...${process.env.DEEPGRAM_API_KEY.slice(-4)})` : '❌ NOT SET');
+console.log('   ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? `✅ Loaded (...${process.env.ANTHROPIC_API_KEY.slice(-4)})` : '❌ NOT SET');
+console.log('   FISH_AUDIO_API_KEY:', process.env.FISH_AUDIO_API_KEY ? `✅ Loaded (...${process.env.FISH_AUDIO_API_KEY.slice(-4)})` : '❌ NOT SET');
+console.log('========================================\n');
+
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';

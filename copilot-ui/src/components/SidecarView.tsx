@@ -150,7 +150,7 @@ export default function SidecarView() {
     } catch (error) {
       console.error('Error handling WebSocket message:', error);
     }
-  }, [queueAudioChunk, setTranscript, setAiResponse]); // All state setters are stable
+  }, [queueAudioChunk]); // Note: setState functions (setTranscript, setAiResponse) are stable and omitted
 
   /**
    * Clear audio queue (e.g., when stopping)

@@ -29,6 +29,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   const isConnectingRef = useRef(false); // Prevent multiple simultaneous connections
   const shouldConnectRef = useRef(true); // Track if we should maintain connection
+  const intentionalDisconnectRef = useRef(false); // Track if disconnect was intentional
   
   // Store callbacks in refs to keep connect function stable
   const onMessageRef = useRef(onMessage);
@@ -69,6 +70,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     console.log('🔌 Initiating WebSocket connection...');
     isConnectingRef.current = true;
     shouldConnectRef.current = true;
+    intentionalDisconnectRef.current = false; // Reset intentional disconnect flag
     
     // TODO: Get WebSocket URL from environment variable
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/ws';
@@ -104,17 +106,21 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         setConnectionStatus('disconnected');
         onCloseRef.current?.();
 
-        // Only attempt to reconnect if we should maintain the connection
-        // This prevents reconnection after intentional disconnect
-        if (shouldConnectRef.current && reconnectCountRef.current < reconnectAttempts) {
+        // Only attempt to reconnect if:
+        // 1. We should maintain connection (shouldConnectRef)
+        // 2. Disconnect was NOT intentional (intentionalDisconnectRef)
+        // 3. We haven't exceeded max reconnection attempts
+        if (!intentionalDisconnectRef.current && shouldConnectRef.current && reconnectCountRef.current < reconnectAttempts) {
           reconnectCountRef.current += 1;
           console.log(`🔄 Reconnecting... Attempt ${reconnectCountRef.current}/${reconnectAttempts}`);
           
           reconnectTimeoutRef.current = setTimeout(() => {
             connect();
           }, reconnectInterval);
+        } else if (intentionalDisconnectRef.current) {
+          console.log('⏹️ Not reconnecting - connection closed intentionally');
         } else if (!shouldConnectRef.current) {
-          console.log('⏹️ Not reconnecting - connection intentionally closed');
+          console.log('⏹️ Not reconnecting - shouldConnect flag is false');
         } else {
           console.log('⚠️ Max reconnection attempts reached');
         }
@@ -130,6 +136,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
   const disconnect = useCallback(() => {
     console.log('🔌 Disconnecting WebSocket...');
+    intentionalDisconnectRef.current = true; // Mark as intentional disconnect
     shouldConnectRef.current = false; // Prevent reconnection attempts
     isConnectingRef.current = false;
     reconnectCountRef.current = 0; // Reset reconnect counter
@@ -140,6 +147,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     }
     
     if (wsRef.current) {
+      // Nullify event handlers to prevent reconnect logic from firing
+      wsRef.current.onopen = null;
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.onmessage = null;
+      
       // Only close if connection is open or connecting
       if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
         wsRef.current.close(1000, 'Client initiated disconnect');
@@ -164,10 +177,35 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     connect();
 
     return () => {
-      console.log('🧹 useWebSocket: Cleanup running - disconnecting');
-      disconnect();
+      console.log('🧹 useWebSocket: Cleanup running - cleaning up connection');
+      
+      // Manual cleanup - don't call disconnect() to avoid dependency issues
+      intentionalDisconnectRef.current = true;
+      shouldConnectRef.current = false;
+      isConnectingRef.current = false;
+      
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = undefined;
+      }
+      
+      if (wsRef.current) {
+        // Nullify event handlers to prevent reconnect logic during cleanup
+        wsRef.current.onopen = null;
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        wsRef.current.onmessage = null;
+        
+        if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
+          wsRef.current.close(1000, 'Component unmounting');
+          console.log('✅ WebSocket closed during cleanup');
+        }
+        wsRef.current = null;
+      }
+      
+      setConnectionStatus('disconnected');
     };
-  }, [connect, disconnect]);
+  }, [connect]); // Only depend on connect, cleanup is manual
 
   return {
     connectionStatus,
