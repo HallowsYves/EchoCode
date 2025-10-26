@@ -152,13 +152,73 @@ Please:
           'Content-Type': 'application/json',
         },
         responseType: 'stream',
+        timeout: 30000, // 30 second timeout for the initial request
       }
     );
 
-    // Stream audio chunks as they arrive
-    for await (const chunk of response.data) {
-      if (chunk && chunk.length > 0) {
-        yield chunk as Buffer;
+    // CRITICAL: Attach error handlers to the response stream to prevent ETIMEDOUT crashes
+    const audioStream = response.data;
+    
+    // Track if we've started receiving data
+    let hasReceivedData = false;
+    let chunkCount = 0;
+    
+    // Attach error handler to prevent uncaught stream errors
+    audioStream.on('error', (streamError: Error) => {
+      console.error('❌ [TTS Stream Error] Error in Fish Audio response stream:', streamError);
+      console.error('   Error name:', streamError.name);
+      console.error('   Error message:', streamError.message);
+      console.error('   Chunks received before error:', chunkCount);
+      console.error('   Had received data:', hasReceivedData);
+      
+      // Don't throw - let the generator complete naturally
+      // The for-await loop will handle the stream ending
+    });
+    
+    // Handle stream end
+    audioStream.on('end', () => {
+      console.log('✅ [TTS Stream] Fish Audio stream ended normally');
+      console.log('   Total chunks received:', chunkCount);
+    });
+    
+    // Handle stream close
+    audioStream.on('close', () => {
+      console.log('🔒 [TTS Stream] Fish Audio stream closed');
+    });
+    
+    // Stream audio chunks as they arrive with error handling
+    try {
+      for await (const chunk of audioStream) {
+        if (chunk && chunk.length > 0) {
+          hasReceivedData = true;
+          chunkCount++;
+          
+          // Log first chunk for debugging
+          if (chunkCount === 1) {
+            console.log('🎵 [TTS Stream] First chunk received:', chunk.length, 'bytes');
+            // Log first 16 bytes to verify format
+            const preview = chunk.slice(0, Math.min(16, chunk.length));
+            const previewBytes = Array.from(preview) as number[];
+            console.log('   First bytes (hex):', previewBytes.map(b => b.toString(16).padStart(2, '0')).join(' '));
+          }
+          
+          yield chunk as Buffer;
+        }
+      }
+      
+      console.log('✅ [TTS Stream] Completed streaming', chunkCount, 'chunks');
+      
+    } catch (iterationError) {
+      console.error('❌ [TTS Stream] Error during stream iteration:', iterationError);
+      console.error('   Chunks streamed before error:', chunkCount);
+      
+      // Re-throw if this is a network error we should propagate
+      if (iterationError instanceof Error && iterationError.message.includes('ETIMEDOUT')) {
+        console.error('❌ [TTS Stream] ETIMEDOUT error detected - connection timed out during streaming');
+        // Don't crash - just log and complete the generator
+      } else {
+        // For other errors, we might want to propagate them
+        throw iterationError;
       }
     }
     

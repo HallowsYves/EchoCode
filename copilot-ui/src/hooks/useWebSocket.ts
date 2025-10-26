@@ -177,33 +177,54 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     connect();
 
     return () => {
-      console.log('🧹 useWebSocket: Cleanup running - cleaning up connection');
+      console.log('🧹 useWebSocket: Cleanup initiated');
       
       // Manual cleanup - don't call disconnect() to avoid dependency issues
+      console.log('   Setting intentional disconnect flags...');
       intentionalDisconnectRef.current = true;
       shouldConnectRef.current = false;
       isConnectingRef.current = false;
       
       if (reconnectTimeoutRef.current) {
+        console.log('   Clearing reconnect timeout...');
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = undefined;
       }
       
       if (wsRef.current) {
+        const currentState = wsRef.current.readyState;
+        console.log('   Current WebSocket state:', {
+          readyState: currentState,
+          CONNECTING: WebSocket.CONNECTING,
+          OPEN: WebSocket.OPEN,
+          CLOSING: WebSocket.CLOSING,
+          CLOSED: WebSocket.CLOSED
+        });
+        
         // Nullify event handlers to prevent reconnect logic during cleanup
+        console.log('   Nullifying event handlers...');
         wsRef.current.onopen = null;
         wsRef.current.onclose = null;
         wsRef.current.onerror = null;
         wsRef.current.onmessage = null;
         
-        if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
+        if (currentState === WebSocket.OPEN || currentState === WebSocket.CONNECTING) {
+          console.log('   Closing WebSocket connection...');
           wsRef.current.close(1000, 'Component unmounting');
-          console.log('✅ WebSocket closed during cleanup');
+          console.log('✅ WebSocket close() called');
+        } else {
+          console.log('   WebSocket already closing/closed, skipping close() call');
         }
+        
+        console.log('   Nullifying wsRef...');
         wsRef.current = null;
+      } else {
+        console.log('   No WebSocket to clean up (wsRef.current is null)');
       }
       
+      console.log('   Setting connection status to disconnected...');
       setConnectionStatus('disconnected');
+      console.log('✅ useWebSocket: Cleanup complete');
     };
   }, [connect]); // Only depend on connect, cleanup is manual
 
