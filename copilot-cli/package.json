@@ -1,0 +1,30 @@
+{
+  "name": "copilot-cli",
+  "version": "1.0.0",
+  "description": "CLI file watcher for Real-Time Voice Code Co-Pilot",
+  "main": "dist/index.js",
+  "bin": {
+    "copilot-watch": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": ["cli", "file-watcher", "coding-assistant"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "axios": "^1.6.7",
+    "dotenv": "^16.4.5",
+    "commander": "^12.0.0",
+    "chalk": "^4.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.25",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.2"
+  }
+}
