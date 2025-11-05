@@ -26,35 +26,32 @@ function getAnthropicClient(): Anthropic {
 /**
  * Get AI response from Claude with relevant file context
  * @param userMessage User's question or request
+ * @param fileContext Optional file context to provide to Claude
  * @returns AI-generated response
  */
-export async function getClaudeResponse(userMessage: string): Promise<string> {
+export async function getClaudeResponse(userMessage: string, fileContext?: string): Promise<string> {
   try {
     const client = getAnthropicClient();
 
-    // Extract potential keywords for context retrieval
-    const keywords = extractKeywords(userMessage);
-    
-    // Get relevant file context from cache
-    const fileContext = fileCache.getRelevantContext(keywords);
+    // If fileContext not provided, get it from cache using semantic search
+    let contextToUse = fileContext;
+    if (!contextToUse) {
+      contextToUse = await fileCache.searchSemanticContext(userMessage, 5);
+    }
 
-    // Build system prompt with file context
-    const systemPrompt = `You are a helpful coding assistant. You have access to the user's codebase through file monitoring.
-
-Current codebase context:
-${fileContext}
-
-Provide concise, accurate coding assistance based on the available context.`;
+    // Build conversational system prompt
+    const systemPrompt = `You are a super brief AI code co-pilot. Provide extremely concise (1-2 sentences maximum) answers to user queries based *only* on the provided context. Get straight to the point. Do not add conversational filler.`;
 
     // Call Claude API
     const response = await client.messages.create({
       model: 'claude-3-haiku-20240307',
-      max_tokens: 1024,
+      max_tokens: 100,
       system: systemPrompt,
       messages: [
         {
           role: 'user',
-          content: userMessage,
+          // Prepend context clearly for the model
+          content: `Context provided:\n${contextToUse}\n\nUser query: ${userMessage}`,
         },
       ],
     });
@@ -86,23 +83,6 @@ Provide concise, accurate coding assistance based on the available context.`;
     
     throw error;
   }
-}
-
-/**
- * Extract keywords from user message for context retrieval
- * Simple implementation - can be enhanced with NLP
- */
-function extractKeywords(message: string): string[] {
-  // Remove common words and extract potential file/code-related terms
-  const commonWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for']);
-  
-  const words = message
-    .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
-    .split(/\s+/)
-    .filter(word => word.length > 2 && !commonWords.has(word));
-  
-  return words;
 }
 
 /**

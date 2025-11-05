@@ -3,11 +3,33 @@ import { IncomingMessage } from 'http';
 import { DeepgramTranscriber } from '../services/speechToText';
 import { getClaudeResponse } from '../services/llm';
 import { synthesizeSpeechStream } from '../services/textToSpeech';
+import { fileCache } from '../services/fileCache';
 
 interface AudioMessage {
-  type: 'audio' | 'control' | 'transcript' | 'start_recording' | 'stop_recording';
+  type: 'audio' | 'control' | 'transcript' | 'start_recording' | 'stop_recording' | 'text_input';
   data?: any;
   action?: string;
+  message?: string;
+}
+
+/**
+ * Safely send a message via WebSocket with error handling
+ * Prevents ETIMEDOUT crashes by catching network errors
+ */
+function safeSend(ws: WebSocket, data: string | Buffer, context: string = 'message'): boolean {
+  try {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+      return true;
+    } else {
+      console.warn(`[WS SEND] Cannot send ${context}: socket readyState is ${ws.readyState} (expected ${WebSocket.OPEN})`);
+      return false;
+    }
+  } catch (sendError) {
+    console.error(`[WS SEND ERROR] Failed to send ${context}:`, sendError);
+    // Don't crash - the connection might recover or close gracefully later
+    return false;
+  }
 }
 
 /**
@@ -36,11 +58,11 @@ export async function handleWebSocketConnection(ws: WebSocket, req: IncomingMess
         fullTranscript += text + ' ';
         
         // Send transcript to client
-        ws.send(JSON.stringify({
+        safeSend(ws, JSON.stringify({
           type: 'transcript',
           data: text,
           isFinal: true
-        }));
+        }), 'final transcript');
         
         console.log(`   [TRANSCRIPT] Transcriber state before LLM processing: ${t.isActive()}`);
 
@@ -52,48 +74,122 @@ export async function handleWebSocketConnection(ws: WebSocket, req: IncomingMess
         console.log(`   [TRANSCRIPT] Transcriber state after LLM processing: ${t.isActive()}`);
       } else {
         // Send interim results to client
-        ws.send(JSON.stringify({
+        safeSend(ws, JSON.stringify({
           type: 'transcript',
           data: text,
           isFinal: false
-        }));
+        }), 'interim transcript');
       }
     });
 
     t.on('error', (error: Error) => {
       console.error('❌ [ERROR] Transcriber error:', error);
-      ws.send(JSON.stringify({
+      safeSend(ws, JSON.stringify({
         type: 'error',
         message: 'Transcription error: ' + error.message
-      }));
+      }), 'transcriber error');
     });
     
     console.log('✅ [SETUP] Transcriber event handlers configured');
   };
 
-  ws.on('message', async (message: Buffer) => {
+  ws.on('message', async (message: Buffer | string) => {
     try {
-      const messageStr = message.toString('utf8');
-      console.log(`📨 Received message: ${message.length} bytes, first 100 chars: ${messageStr.substring(0, 100)}`);
+      // CRITICAL: In ws library, ALL messages arrive as Buffers by default
+      // We need to try parsing as JSON first, then fall back to treating as binary audio
       
-      // Try to parse as JSON for control messages
+      let messageStr: string;
+      
+      // Convert to string (handles both Buffer and string inputs)
+      if (Buffer.isBuffer(message)) {
+        messageStr = message.toString('utf8');
+      } else {
+        messageStr = message;
+      }
+      
+      // Try to parse as JSON first
       let parsed: AudioMessage | null = null;
-      let isJson = false;
+      let isJsonMessage = false;
       
       try {
         parsed = JSON.parse(messageStr);
-        isJson = true;
         
-        if (!parsed || typeof parsed !== 'object') {
-          throw new Error('Invalid JSON format');
-        }
-        
-        console.log(`✅ Parsed JSON message type: ${parsed.type}`);
-        
-        if (parsed.type === 'control') {
-          await handleControlMessage(parsed, ws, transcriber);
-          return;
-        }
+        if (parsed && typeof parsed === 'object' && 'type' in parsed) {
+          isJsonMessage = true;
+          console.log(`✅ Parsed JSON message type: ${parsed.type}`);
+          
+          // Handle text_input message type
+          if (parsed.type === 'text_input') {
+            console.log(`🔍 [TEXT_INPUT] Entering text_input handler block`);
+            console.log(`   Message value: "${parsed.message}"`);
+            console.log(`   Message type: ${typeof parsed.message}`);
+            console.log(`   Message trimmed length: ${parsed.message?.trim().length || 0}`);
+            
+            if (parsed.message && typeof parsed.message === 'string' && parsed.message.trim()) {
+              console.log(`💬 [TEXT_INPUT] Processing text input: "${parsed.message}"`);
+              
+              try {
+                // Skip STT - text is already provided
+                const userText = parsed.message.trim();
+                console.log(`🚀 [TEXT_INPUT] Starting LLM and TTS pipeline for: "${userText}"`);
+                
+                // --- Smart Context Selection using Semantic Search ---
+                console.log('🧠 Selecting relevant file context using semantic search...');
+                const relevantFileContext = await fileCache.searchSemanticContext(userText, 5);
+                console.log(`   Context selection complete.`);
+                // --- End Smart Context Selection ---
+                
+                // Get LLM response with selected context
+                const llmResponse = await getClaudeResponse(userText, relevantFileContext);
+                console.log('✨ LLM response generated for text input');
+                
+                // Send text response to client
+                safeSend(ws, JSON.stringify({
+                  type: 'ai_response',
+                  data: llmResponse
+                }), 'AI response text');
+                
+                // Synthesize and stream TTS response
+                let chunkCount = 0;
+                for await (const chunk of synthesizeSpeechStream(llmResponse)) {
+                  const sent = safeSend(ws, JSON.stringify({
+                    type: 'audio',
+                    data: chunk.toString('base64'),
+                    format: 'mp3',
+                    chunkIndex: chunkCount++
+                  }), `audio chunk ${chunkCount}`);
+                  
+                  if (!sent) {
+                    console.warn('WebSocket send failed, stopping audio stream');
+                    break;
+                  }
+                }
+                
+                // Signal end of audio stream
+                safeSend(ws, JSON.stringify({
+                  type: 'audio_end',
+                  totalChunks: chunkCount
+                }), 'audio stream end');
+                
+                console.log('✅ Text input processed successfully');
+                
+              } catch (error) {
+                console.error('❌ Error processing text input:', error);
+                safeSend(ws, JSON.stringify({
+                  type: 'error',
+                  message: 'Failed to process text input: ' + (error instanceof Error ? error.message : 'Unknown error')
+                }), 'text input error');
+              }
+            } else {
+              console.warn('⚠️ Received text_input with empty or invalid message');
+            }
+            return;
+          }
+          
+          if (parsed.type === 'control') {
+            await handleControlMessage(parsed, ws, transcriber);
+            return;
+          }
         
         if (parsed.type === 'start_recording') {
           // Start transcription session with FRESH transcriber instance
@@ -119,15 +215,15 @@ export async function handleWebSocketConnection(ws: WebSocket, req: IncomingMess
             console.log('✅ [START_RECORDING] Transcriber started successfully');
             console.log(`   State check: isActive() = ${transcriber.isActive()}`);
             
-            ws.send(JSON.stringify({
+            safeSend(ws, JSON.stringify({
               type: 'recording_started'
-            }));
+            }), 'recording started');
           } catch (error) {
             console.error('❌ [START_RECORDING] Failed to start transcriber:', error);
-            ws.send(JSON.stringify({
+            safeSend(ws, JSON.stringify({
               type: 'error',
               message: 'Failed to start recording: ' + (error instanceof Error ? error.message : 'Unknown error')
-            }));
+            }), 'start recording error');
           }
           
           return;
@@ -150,17 +246,17 @@ export async function handleWebSocketConnection(ws: WebSocket, req: IncomingMess
               transcriber = null;
               console.log('✅ [STOP_RECORDING] Transcriber cleanup complete');
               
-              ws.send(JSON.stringify({
+              safeSend(ws, JSON.stringify({
                 type: 'recording_stopped',
                 fullTranscript
-              }));
+              }), 'recording stopped');
               fullTranscript = ''; // Reset
             } catch (error) {
               console.error('❌ [STOP_RECORDING] Error stopping transcriber:', error);
-              ws.send(JSON.stringify({
+              safeSend(ws, JSON.stringify({
                 type: 'error',
                 message: 'Failed to stop recording: ' + (error instanceof Error ? error.message : 'Unknown error')
-              }));
+              }), 'stop recording error');
             }
           } else {
             console.warn('⚠️ [STOP_RECORDING] stop_recording called but no transcriber instance exists');
@@ -173,42 +269,42 @@ export async function handleWebSocketConnection(ws: WebSocket, req: IncomingMess
           await handleTranscript(parsed.data, ws);
           return;
         }
+      }
       } catch (parseError) {
-        // Not JSON, treat as raw audio data
-        // console.log(`🎵 [AUDIO] Binary audio data received: ${message.length} bytes`);
+        // Not JSON or JSON parsing failed - treat as binary audio data
+        isJsonMessage = false;
+        console.log('📦 Message is not JSON, treating as binary audio data');
+      }
+      
+      // If not a JSON message, treat as binary audio
+      if (!isJsonMessage && Buffer.isBuffer(message)) {
+        // Handle Buffer (audio data)
+        const audioBuffer = message as Buffer;
         
-        // Enhanced checks before forwarding audio
+        // **REFINED LOGIC:** Only forward if transcriber is ready AND session is active
+        // This prevents spurious warnings when audio arrives before start_recording
         if (transcriber && transcriber.isActive() && transcriber.isConnectionReady() && isSessionActive) {
-          // Send audio chunk to Deepgram (comment out verbose logging to reduce noise)
-          // console.log(`📤 [AUDIO] Forwarding audio chunk... (State: active=${transcriber.isActive()}, ready=${transcriber.isConnectionReady()})`);
-          transcriber.sendAudio(message);
-        } else {
-          // Detailed diagnostic logging only on failure
-          console.warn(`⚠️ [AUDIO] Cannot forward audio - State check failed:`);
+          // Send audio chunk to Deepgram
+          // console.log(`📤 [AUDIO] Forwarding audio chunk: ${audioBuffer.length} bytes`);
+          transcriber.sendAudio(audioBuffer);
+        } else if (transcriber && isSessionActive) {
+          // **ONLY LOG WARNING if session is active but transcriber isn't ready**
+          // This avoids noise from audio data arriving before start_recording completes
+          console.warn(`⚠️ [AUDIO] Session active but cannot forward audio:`);
           console.warn(`   • transcriber exists: ${transcriber !== null}`);
           console.warn(`   • transcriber.isActive(): ${transcriber?.isActive()}`);
           console.warn(`   • transcriber.isConnectionReady(): ${transcriber?.isConnectionReady()}`);
           console.warn(`   • sessionActive: ${isSessionActive}`);
-          
-          // Provide specific reasons
-          if (!transcriber) {
-            console.warn('   → Reason: No transcriber instance (did start_recording arrive?)');
-          } else if (!transcriber.isActive()) {
-            console.warn('   → Reason: Transcriber not active. Call start_recording first.');
-          } else if (!transcriber.isConnectionReady()) {
-            console.warn('   → Reason: Connection not ready (WebSocket may be closed/closing)');
-          } else if (!isSessionActive) {
-            console.warn('   → Reason: Session not active');
-          }
         }
+        // Silently ignore audio data if no session is active (normal during idle)
       }
 
     } catch (error) {
-      console.error('Error handling WebSocket message:', error);
-      ws.send(JSON.stringify({
+      console.error('❌ Error handling WebSocket message:', error);
+      safeSend(ws, JSON.stringify({
         type: 'error',
         message: error instanceof Error ? error.message : 'Unknown error'
-      }));
+      }), 'message handler error');
     }
   });
 
@@ -251,10 +347,10 @@ export async function handleWebSocketConnection(ws: WebSocket, req: IncomingMess
 
   // Send ready message
   console.log('✅ [CONNECTION] Sending ready message to client');
-  ws.send(JSON.stringify({
+  safeSend(ws, JSON.stringify({
     type: 'ready',
     message: 'WebSocket connection established'
-  }));
+  }), 'ready message');
   console.log('📝 [CONNECTION] WebSocket setup complete - waiting for start_recording command');
 }
 
@@ -271,14 +367,14 @@ async function handleControlMessage(
       if (transcriber) {
         await transcriber.stop();
       }
-      ws.send(JSON.stringify({ type: 'session_ended' }));
+      safeSend(ws, JSON.stringify({ type: 'session_ended' }), 'session ended');
       ws.close();
       break;
     case 'mute':
-      ws.send(JSON.stringify({ type: 'muted' }));
+      safeSend(ws, JSON.stringify({ type: 'muted' }), 'muted');
       break;
     case 'unmute':
-      ws.send(JSON.stringify({ type: 'unmuted' }));
+      safeSend(ws, JSON.stringify({ type: 'unmuted' }), 'unmuted');
       break;
     default:
       console.log('Unknown control action:', message.action);
@@ -297,52 +393,48 @@ async function handleTranscript(transcript: string, ws: WebSocket) {
     const aiResponse = await getClaudeResponse(transcript);
     
     // Send text response to frontend
-    ws.send(JSON.stringify({
+    safeSend(ws, JSON.stringify({
       type: 'ai_response',
       data: aiResponse
-    }));
+    }), 'AI response');
 
     // Step 2: Synthesize speech (Fish Audio TTS)
     try {
       let chunkCount = 0;
       
       for await (const chunk of synthesizeSpeechStream(aiResponse)) {
-        if (ws.readyState === WebSocket.OPEN) {
-          // Send audio chunk as base64 encoded JSON message
-          // Frontend will decode and play
-          ws.send(JSON.stringify({
-            type: 'audio',
-            data: chunk.toString('base64'),
-            format: 'mp3',
-            chunkIndex: chunkCount++
-          }));
-        } else {
-          console.warn('WebSocket closed, stopping audio stream');
+        const sent = safeSend(ws, JSON.stringify({
+          type: 'audio',
+          data: chunk.toString('base64'),
+          format: 'mp3',
+          chunkIndex: chunkCount++
+        }), `audio chunk ${chunkCount}`);
+        
+        if (!sent) {
+          console.warn('WebSocket send failed, stopping audio stream');
           break;
         }
       }
 
       // Signal end of audio stream
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'audio_end',
-          totalChunks: chunkCount
-        }));
-      }
+      safeSend(ws, JSON.stringify({
+        type: 'audio_end',
+        totalChunks: chunkCount
+      }), 'audio end');
       
     } catch (ttsError) {
       console.error('TTS Error:', ttsError);
-      ws.send(JSON.stringify({
+      safeSend(ws, JSON.stringify({
         type: 'error',
         message: 'Failed to generate speech: ' + (ttsError instanceof Error ? ttsError.message : 'Unknown error')
-      }));
+      }), 'TTS error');
     }
     
   } catch (error) {
     console.error('Error handling transcript:', error);
-    ws.send(JSON.stringify({
+    safeSend(ws, JSON.stringify({
       type: 'error',
       message: error instanceof Error ? error.message : 'Unknown error'
-    }));
+    }), 'transcript handler error');
   }
 }

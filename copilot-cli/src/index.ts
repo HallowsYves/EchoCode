@@ -4,6 +4,8 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { startWatcher } from './watcher';
 
+//
+ 
 const argv = yargs(hideBin(process.argv))
   .usage('Usage: $0 <directory> [options]')
   .command('$0 <directory>', 'Watch a directory for file changes', (yargs: any) => {
